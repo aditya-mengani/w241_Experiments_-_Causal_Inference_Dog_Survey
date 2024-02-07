@@ -1,0 +1,172 @@
+---
+title: "Dog Adoption Survey Results"
+author: "John Calzaretta, Aditya Mengani, Jesus Fernandez"
+date: "12/06/2022"
+output:
+  pdf_document: default
+  word_document: default
+---
+
+```{r install packages, message = FALSE}
+install.packages("lmtest")
+install.packages("sandwich")
+install.packages("AER")
+install.packages("patchwork")
+install.packages("stargazer")
+```
+
+```{r load packages, message = FALSE}
+library(stargazer)
+library(data.table)
+library(sandwich)
+library(lmtest)
+library(AER) 
+library(ggplot2) 
+library(patchwork)
+library(dplyr)
+```
+
+```{r load  data}
+d <- fread('../data/das_results_cleaned.csv')
+head(d)
+```
+
+# Clustered Treatments
+- Message or No Message (applies across all participant-dog ratings)
+- No shelter info or some shelter info (applies across all participant-dog ratings)
+
+# Non-Clustered Treatments
+- For people w/ some shelter info, each dog is randomly either labeled as traditional or no-kill shelter
+
+
+# Model 1: Clustered Message Treatment Alone
+```{r message treatment model, include=TRUE}
+model_msg_base <- d[ , lm(rating ~ factor(msg_treat_ind))]
+model_msg_covs<- d[ , lm(rating ~ factor(msg_treat_ind) +
+                              factor(age_bin) + 
+                              factor(gender) + 
+                              factor(marital) + 
+                              factor(income_bin) + 
+                              factor(own_dog) + 
+                              factor(dog_or_cat) + 
+                              factor(adopt_or_shop) + 
+                              factor(dog_size) + 
+                              factor(state) +
+                              duration
+                              )] # no fixed effects
+
+stargazer(
+  model_msg_base,
+  model_msg_covs,
+  type = 'text', 
+  se = list(
+    vcovCL(model_msg_base), # <----- clustered standard errors
+    vcovCL(model_msg_covs)  # <----- clustered standard errors
+  ), omit.stat = c('ser', 'F')
+)
+
+```
+
+## Model 2: No Shelter Info (SI) vs Some Shelter Info Treatment
+```{r shelter info/no-info treatment model, include=TRUE}
+d$any_SI_treat <- ifelse(d$shelter_tp==0, 0, 1)
+model_SI_base <- d[ , lm(rating ~ factor(any_SI_treat))]
+model_SI_covs<- d[ , lm(rating ~ factor(any_SI_treat) +
+                              factor(age_bin) + 
+                              factor(gender) + 
+                              factor(marital) + 
+                              factor(income_bin) + 
+                              factor(own_dog) + 
+                              factor(dog_or_cat) + 
+                              factor(adopt_or_shop) + 
+                              factor(dog_size) + 
+                              factor(state) +
+                              duration
+                              )] # <----- no fixed effects
+
+stargazer(
+  model_SI_base,
+  model_SI_covs,
+  type = 'text', 
+  se = list(
+    vcovCL(model_SI_base), # <----- clustered standard errors
+    vcovCL(model_SI_covs)  # <----- clustered standard errors
+  ), omit.stat = c('ser', 'F')
+)
+
+```
+
+## Model 3: Interaction of Clustered Treatments (Message & Any Shelter Info)
+```{r shelter info/no-info treatment model, include=TRUE}
+# Create interaction groups for the 2 clustered treatments
+d$clustered_treatment_inter <- ifelse(
+  (d$msg_treat_ind==0)&(d$any_SI_treat==0), 1, ifelse(
+    (d$msg_treat_ind==0)&(d$any_SI_treat==1), 2, ifelse(
+      (d$msg_treat_ind==1)&(d$any_SI_treat==0), 3, 4)))
+
+# Models
+clust_interaction_base <- d[ , lm(rating ~ factor(clustered_treatment_inter))]
+clust_interaction_covs <- d[ , lm(rating ~ factor(clustered_treatment_inter) +
+                                    factor(age_bin) + 
+                                    factor(gender) + 
+                                    factor(marital) + 
+                                    factor(income_bin) + 
+                                    factor(own_dog) + 
+                                    factor(dog_or_cat) + 
+                                    factor(adopt_or_shop) + 
+                                    factor(dog_size) + 
+                                    factor(state) +
+                                    duration
+                                    )] # no fixed effects
+
+stargazer(
+  clust_interaction_base,
+  clust_interaction_covs,
+  type = 'text', 
+  se = list(
+    vcovCL(clust_interaction_base), # <----- clustered standard errors
+    vcovCL(clust_interaction_covs)  # <----- clustered standard errors
+  ), omit.stat = c('ser', 'F')
+)
+
+```
+
+## Model 4: Traditional Shelter vs. No-Kill Shelter Info
+```{r shelter type model, include=TRUE}
+# Filter out any participants with no shelter info
+d$shelter_nk_treat <- ifelse(d$shelter_tp==1, 0, 1)
+
+# Create average outcome covariate
+d_ao <- d %>%
+  group_by(ip) %>%
+  summarize(outcome_avg = mean(rating))
+d2 <- d %>%
+  filter(shelter_tp != 0) %>%
+  inner_join(d_ao, by="ip")
+
+# Model
+trad_nk_base <- d2[ , lm(rating ~ factor(shelter_nk_treat))]
+trad_nk_fixed <- d2[ , lm(rating ~ factor(shelter_nk_treat) +
+                              factor(age_bin) + 
+                              factor(gender) + 
+                              factor(marital) + 
+                              factor(income_bin) + 
+                              factor(own_dog) + 
+                              factor(dog_or_cat) + 
+                              factor(adopt_or_shop) + 
+                              factor(dog_size) + 
+                              factor(state) +
+                              duration +
+                              outcome_avg # <---- added fixed effects
+                              )]
+
+stargazer(
+  trad_nk_base,
+  trad_nk_fixed,
+  type = 'text', 
+  se = list(
+    vcovCL(trad_nk_base), # <----- clustered standard errors
+    vcovCL(trad_nk_fixed) # <----- clustered standard errors
+  ), omit.stat = c('ser', 'F')
+)
+```
